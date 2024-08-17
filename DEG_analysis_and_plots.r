@@ -201,9 +201,9 @@ dge <- calcNormFactors(dge, method="TMM")
 # saveRDS(object = dge,
 #         file = "cer_dge.RDS",
 #         compress = FALSE)
-# 
-# #read dge
-# dge <- readRDS("cer_dge.RDS")
+
+#read dge
+dge <- readRDS("cer_dge.RDS")
 
 #get tmm normalized count
 cervicalData_tmm_normalize <- edgeR::cpm(dge, log = FALSE) %>% as.matrix.default()
@@ -240,9 +240,9 @@ res$Expression = ifelse(res$FDR < 0.05 & abs(res$logFC) >= 1,
                         ifelse(res$logFC>= 1 ,'Up-regulated in Tumor','Down-regulated in Tumor'),
                         'Stable')
 
-#save DEG result
-saveRDS(res, "cc_deg_result.rds")
-
+# #save DEG result
+# saveRDS(res, "cc_deg_result.rds")
+# 
 #readRDS
 res <- readRDS("cc_deg_result.rds")
 
@@ -321,25 +321,29 @@ top_genes <- rbind(
 #add gene name to column
 top_genes$gene_name <- rownames(top_genes)
 
+#show gene of interest
 res <- res.plot + 
   geom_label_repel(data = top_genes,
-                   mapping = aes(logFC, -log(FDR,10), label = gene_name, fontface = "bold"),
-                   size = 3, nudge_x = 0.5, box.padding = 0.5,  show.legend = FALSE,
+                   mapping = aes(logFC, -log(FDR,10), label = Gene, fontface = "bold"), direction = "both",
+                   size = 3, nudge_x = 0.1, box.padding = 0.5,  show.legend = FALSE, max.overlaps = Inf,
                    nudge_y = 0.2) + guides(color = guide_legend(override.aes = list(size = 5))) 
 
 # Display the plot
 print(res) 
 
+
 ########
 #PLOT 2
 ########
-#select core intratumoral treg genes for heatmap
-tp53_pathway.prot <- c("PLAU", "TPX2", "TPI1", "FABP5", "KIF11", "GPI", "ESRRA", "AURKA", "MTHFD1", 
-                       "UMPS", "GM2A", "RANBP1", "TYMS", "GART", "CCNA2", "STAT1", "DOT1L", "MMP12", 
-                       "PARP1", "VDR", "HMGCR", "TK1", "MDM2", "SYK", "DTYMK", "HPRT1", "ADK", 
-                       "CA2", "CDK2", "ACP3", "SEC14L2", "GALE", "YARS1", "SULT2B1", "TYMP", 
-                       "S100A9", "UCK2", "MMP9")
+#readRDS
+res <- readRDS("cc_deg_result.rds")
 
+#select core compound targeted genes in cervical cancer
+compound_disease_signature <- c("PLAU", "TPX2", "TPI1", "FABP5", "KIF11", "GPI", "ESRRA", "AURKA", "MTHFD1", 
+                                "UMPS", "GM2A", "RANBP1", "TYMS", "GART", "CCNA2", "STAT1", "DOT1L", "MMP12", 
+                                "PARP1", "VDR", "HMGCR", "TK1", "MDM2", "SYK", "DTYMK", "HPRT1", "ADK", 
+                                "CA2", "CDK2", "ACP3", "SEC14L2", "GALE", "YARS1", "SULT2B1", "TYMP", 
+                                "S100A9", "UCK2", "MMP9")
 
 #remove genes with NA as adjpvalue
 res <- na.omit(res)
@@ -369,19 +373,77 @@ res.plot <- ggplot(data = res,
 print(res.plot)
 
 #add labels and connectors for top enriched genes
-tp53_gene_length <- 38
+compound_disease_signature_length <- 38
 
-#extract the data of genes over-represented in the tp53 pathways  
-tp53_pathway.dat <- res %>% 
-  filter(res$Gene %in% tp53_pathway.prot)
+#extract the data of compound targeted genes in cervical cancer
+compound_disease_signature.dat <- res %>% 
+  filter(res$Gene %in% compound_disease_signature)
 
 #show gene of interest
 res <- res.plot + 
-  geom_label_repel(data = tp53_pathway.dat,
-                   mapping = aes(logFC, -log(FDR,10), label = Gene, fontface = "bold"),
-                   size = 3, nudge_x = 0.1, box.padding = 0.5,  show.legend = FALSE,
+  geom_label_repel(data = compound_disease_signature.dat,
+                   mapping = aes(logFC, -log(FDR,10), label = Gene, fontface = "bold"), direction = "both",
+                   size = 3, nudge_x = 0.1, box.padding = 0.5,  show.legend = FALSE, max.overlaps = Inf,
                    nudge_y = 0.2) + guides(color = guide_legend(override.aes = list(size = 5))) 
 
 # Display the plot
 print(res) 
 
+#@@@@@@@@@@@@@@@@@
+#@@@@@@@@@@@@@@@@@
+#ndx for stratifying patients based on tissue biopsy
+normal_tissue_idents <- rownames(dge$samples)[which(dge$samples$sample_type.samples == "Normal tissue")]
+primary_tumor_idents <- rownames(dge$samples)[which(dge$samples$sample_type.samples == "Primary Tumor")]
+
+#get expression matrix
+expression_data <- cervicalData_tmm_normalize
+
+#select "CCNA2" for statistical analysis
+cervical_cancer_biomarker <- c("CCNA2")
+
+#subset expression data for gene of interest
+expression_data <- as.data.frame(expression_data[rownames(cervicalData_tmm_normalize) %in% cervical_cancer_biomarker,])
+names(expression_data) <- "CCNA2"
+
+#get tissue details from phenotype data
+phenotype_data <- dge$samples %>% dplyr::select(sample_type.samples)
+names(phenotype_data) <- "Tissue"
+
+#match patient ident in expression and pData
+phenotype_data <- phenotype_data[match(rownames(expression_data), rownames(phenotype_data)), ]
+
+#Combine the data frames by column
+expression_pData <- cbind(expression_data, phenotype_data)
+
+#rename column
+names(expression_pData)[2] <- "Tissue"
+
+#####
+#plot graph with statistical significance
+#####
+#Define your specific comparisons
+comparisons_list <- list(c("Normal tissue", "Primary Tumor"))
+
+#themes
+themes <- theme(strip.text = element_text(face = "bold", size = 15), panel.border = element_rect(color = "black", fill = NA, size = 1),
+                legend.text = element_text(face = "bold", size = 15),legend.title = element_text(face = "bold", size = 15),
+                plot.title = element_text(face = "bold", size = 15), axis.title = element_text(face = "bold", size = 15),
+                axis.text.x = element_text(face = "bold", size = 15, colour = "black", angle = 40, hjust = 1), 
+                axis.text.y = element_text(face = "bold", size = 15, colour = "black"),
+                axis.ticks.x = element_blank(), legend.position = "None",
+                panel.background = element_rect(fill = "white"), axis.line = element_line(linewidth = 0.8, colour = "black"))
+
+expression_pData %>%
+  ggplot(., aes(x=Tissue, y= CCNA2)) +
+  geom_boxplot(aes(fill = Tissue), outlier.color = NA) + theme_classic() +
+  #geom_jitter(size = 0.2, alpha = 0.5) +
+  stat_compare_means(comparisons = comparisons_list, method = "wilcox.test", 
+                     label = "p.signif", p.adjust.method = "BH", 
+                     vjust = 0, 
+                     map_signif_level = TRUE, step_increase = 0.1, 
+                     textsize = 6, size = 7, 
+                     tip_length = 5, na.rm = T) +
+  labs(y= "Expression log(cpm)", x = " ", fill = "Tissue") +
+  theme_classic() +
+  themes +
+  ggtitle("CCNA2 expression in primary tumor vs normal tissue")
