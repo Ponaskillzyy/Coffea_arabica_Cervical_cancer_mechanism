@@ -300,7 +300,7 @@ res.plot <- ggplot(data = res,
   labs(x=expression(bold("Log"[2]*"(Fold Change)")),
        y= expression(bold("-Log"[10]*"(FDR)")),
        title="DEGs in Tumor samples vs Normal Tissue in Cervical Cancer")  + 
-  theme_classic() + volcano.theme 
+  theme_classic() + volcano.theme + theme(legend.position = "top")
 
 #view
 print(res.plot)
@@ -367,7 +367,7 @@ res.plot <- ggplot(data = res,
   labs(x=expression(bold("Log"[2]*"(Fold Change)")),
        y= expression(bold("-Log"[10]*"(FDR)")),
        title="Overlapping gene targets between cervical cancer DEGs and C. arabica compound-derived targets")  + 
-  theme_classic() + volcano.theme 
+  theme_classic() + volcano.theme + theme(legend.position = "top")
 
 #view
 print(res.plot)
