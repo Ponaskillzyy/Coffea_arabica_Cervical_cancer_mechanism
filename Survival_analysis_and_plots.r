@@ -3,7 +3,7 @@
 ###################
 #Set work directory
 ###################
-setwd("/Users/prosperchukwuemeka/Movies/Ziglar/New_CC_arabica")
+setwd("/Users/prosperchukwuemeka/Movies/Ziglar/New_CC_arabica/Revision")
 
 ###############
 #Load libraries
@@ -18,7 +18,7 @@ suppressWarnings(suppressPackageStartupMessages({library(dplyr); library(ggplot2
 #Download gene expression data of cervical from TCGA
 ####################################################
 #download link
-cervical.exp_mat.link <- "https://gdc-hub.s3.us-east-1.amazonaws.com/download/TCGA-CESC.htseq_counts.tsv.gz"
+cervical.exp_mat.link <- "https://gdc-hub.s3.us-east-1.amazonaws.com/download/TCGA-CESC.star_counts.tsv.gz"
 
 #retrieve gene expression data
 download.file(cervical.exp_mat.link, destfile= paste(getwd(), "cer_dataset.tsv.gz", sep ="/"))
@@ -42,12 +42,17 @@ pseudocnt_count <- function(count){
 #apply function on dataframe to get raw count
 cervical.exp_mat <- apply(cervical.exp_mat, 2, FUN = pseudocnt_count)
 
-#View(cervical.exp_mat)
+#view
+View(cervical.exp_mat)
 
 #cbind Ensembl_ID with cervical.exp.mat
 cervical.exp_mat  <- cbind(Ensembl_ID, cervical.exp_mat) %>% as.data.frame() %>% column_to_rownames(var = "Ensembl_ID")
 
-#View(cervical.exp_mat)
+#view
+View(cervical.exp_mat)
+
+#convert dataframe to matrix
+cervical.exp_mat  <- as.matrix(cervical.exp_mat)
 
 #mapping gene symbol to Ensembl_ID and feature reduction
 #remove version ID from rownames in count matrix
@@ -58,8 +63,8 @@ mart <- biomaRt::useMart(biomart = "ensembl", dataset =  "hsapiens_gene_ensembl"
 transcript.info <- biomaRt::getBM(attributes = c("hgnc_symbol", "ensembl_gene_id","entrezgene_id",
                                                  "transcript_biotype",  "transcript_length"), mart = mart)
 
-#save transcript information
-saveRDS(transcript.info, paste0(getwd(), "/transcript.info.rds"))
+# #save transcript information
+# saveRDS(transcript.info, paste0(getwd(), "/transcript.info.rds"))
 
 #select protein coding genes only from biomaRt annotation data
 transcript.info <- filter(transcript.info, transcript_biotype %in% c("protein_coding"))
@@ -69,6 +74,9 @@ transcript.info <- transcript.info %>% distinct(hgnc_symbol, .keep_all = TRUE) #
 
 #annotate "ensembl_ID" with "hgnc_symbol"
 annotation_table <- transcript.info[,1:2]
+
+#convert gene expression data type from matrices to dataframe
+cervical.exp_mat <- as.data.frame(cervical.exp_mat)
 
 #create a column containing ensembl_ID in brca raw_count 
 cervical.exp_mat <- rownames_to_column(cervical.exp_mat)
@@ -89,25 +97,27 @@ rownames(cervical.exp_mat) <- cervical.exp_mat$hgnc_symbol
 #delete the column containing "ensembl_gene_id" & "hgnc_symbol"
 cervical.exp_mat <- cervical.exp_mat[, !names(cervical.exp_mat) %in% c("ensembl_gene_id", "hgnc_symbol")]
 
-
 #@@@@@@@@@@@@@@@@@@@@@
 #@@@@@@@@@@@@@@@@@@@@@
 #download link for phenotype data
-phenoData_link <- "https://gdc-hub.s3.us-east-1.amazonaws.com/download/TCGA-CESC.GDC_phenotype.tsv.gz"
+phenoData_link <- "https://gdc-hub.s3.us-east-1.amazonaws.com/download/TCGA-CESC.clinical.tsv.gz"
 
 #retrieve phenodata
 download.file(phenoData_link, destfile= paste(getwd(), "cer_phenoData.tsv.gz", sep ="/"))
 cer_phenodata <- fread(paste0(getwd(), "/cer_phenoData.tsv.gz"))
 
 #subset only samples found in cervical.exp_mat
-cer_phenodata <- cer_phenodata %>% filter(submitter_id.samples %in% colnames(cervical.exp_mat))
+cer_phenodata <- cer_phenodata %>% filter(sample %in% colnames(cervical.exp_mat))
 
-#subset "Metastatic" $ "primary Tumor"
+#########
+#metadata to look into "disease_type", "age_at_index.demographic", "treatment_or_therapy.treatments.diagnoses"
+#########
+#subset "primary Tumor"
 cer_phenodata <- cer_phenodata %>% 
   filter(sample_type.samples %in% c("Primary Tumor")) %>% as.data.frame() %>% 
-  column_to_rownames(var = "submitter_id.samples")
+  column_to_rownames(var = "sample")
 
-#subset only samples that are "Metastatic" & "Primary Tumor" in cervical.exp_mat
+#subset only samples that are "Primary Tumor" in cervical.exp_mat
 cervical.exp_mat <- cervical.exp_mat[, colnames(cervical.exp_mat) %in% rownames(cer_phenodata)] %>% as.data.frame()
 
 #check if desired sample type is appropriately retrieved
@@ -119,7 +129,7 @@ head(cer_phenodata)
 #@@@@@@@@@@@@@@@@@@@@@
 #@@@@@@@@@@@@@@@@@@@@@
 #retrieve survival data 
-survData_link <- "https://gdc-hub.s3.us-east-1.amazonaws.com/download/TCGA-CESC.survival.tsv"
+survData_link <- "https://gdc-hub.s3.us-east-1.amazonaws.com/download/TCGA-CESC.survival.tsv.gz"
 
 #retrieve SurvData
 download.file(survData_link, destfile= paste(getwd(), "cer_survData.tsv.gz", sep ="/"))
@@ -156,38 +166,13 @@ new_cer_phenodata <- new_cer_phenodata[reorder_ndx, ]
 #View new phenodata
 #head(new_cer_phenodata)
 
-#retrieve transcript_length from biomart
-transcript <- data.frame(transcript.info[, c("hgnc_symbol", "transcript_length")])
-
-#make a dataframe of genes present in cervical.exp_mat
-hgnc_symbol <- as.data.frame(rownames(cervical.exp_mat), row.names = rownames(cervical.exp_mat))
-colnames(hgnc_symbol) <- "hgnc_symbol"
-
-#join hgnc_symbol dataframe $ transcript dataframe to get 
-transcript <- left_join(hgnc_symbol, transcript, 
-                        by='hgnc_symbol') #%>% column_to_rownames(var = "hgnc_symbol")
-
-rownames(transcript) <- transcript$hgnc_symbol
-
-#View transcript
-#head(transcript)
-
 ##############################
 #Normalization by TMM in edgeR
 ##############################
 #Organize data in a summarized experiment (se) for downstream
 cer_se <- SummarizedExperiment(assays = cervical.exp_mat,
-                               rowData = transcript,
+                               rowData = rownames(cervical.exp_mat),
                                colData = new_cer_phenodata)
-
-#save summarized experiment as RDS for posterity
-saveRDS(cer_se, "/Users/prosperchukwuemeka/Movies/Ziglar/cer_se.rds")
-
-#read summarized experiment
-cer_se <- readRDS("cer_se.rds")
-#assay(cer_se)
-#colData(cer_se)
-#rowData(cer_se)
 
 #normalization by trimmed mean of M (TMM)
 #create factor for all samples
@@ -212,30 +197,32 @@ head(dge$samples)
 # Normalization (by TMM)
 dge <- calcNormFactors(dge, method="TMM")
 
-#save dge as RDS
-saveRDS(object = dge,
-        file = "cer_dge.RDS",
-        compress = FALSE)
-
-#read dge
-dge <- readRDS("cer_dge.RDS")
+# #save dge as RDS
+# saveRDS(object = dge,
+#         file = "cer_dge.RDS",
+#         compress = FALSE)
+# 
+# #read dge
+# dge <- readRDS("cer_dge.RDS")
 
 #get tmm normalized count
 cervicalData_tmm_normalize <- edgeR::cpm(dge, log = FALSE) %>% as.matrix.default()
 
 #View normalized count matrix
-#View(cervicalData_tmm_normalize)
-
-##################################################################################################
-### From our exploratory analysis both edgeR and vst normalization work best so either can be used
-### NB: for the sake of this work shop we will proceed with vst transformed expression matrix
-##################################################################################################
+View(cervicalData_tmm_normalize)
 
 ###############################################
-#subset gene of interests for survival analysis
+#subset Shared Compound-Cervical Cancer Targets for survival analysis
 ###############################################
-#subset TP53, MDM2, & BCL6
-survival_genes <- cervicalData_tmm_normalize[rownames(cervicalData_tmm_normalize) %in% c("TPX2", "AURKA", "CCNA2", "MDM2", "CDK2"),]
+#load compound-disease shared targets
+compound_disease_targets <- fread("Common Targets.csv") %>% 
+  pull(`Common Targets`) 
+
+#exclude specific genes
+compound_disease_targets <- setdiff(compound_disease_targets, c("AKR1C1", "AKR1C2", "NOS2"))
+
+#subset genes
+survival_genes <- cervicalData_tmm_normalize[rownames(cervicalData_tmm_normalize) %in% compound_disease_targets,]
 
 #transpose survival_genes dataframe
 survival_genes <- as.data.frame(t(survival_genes))
@@ -250,7 +237,7 @@ colnames(new_survival_info) <- c(OS = "event", OS.time.year = "time", initial_we
 survival_df <- cbind(survival_genes, new_survival_info)
 
 #save survival_df as rds 
-saveRDS(survival_df, "/Users/prosperchukwuemeka/Movies/Ziglar/survival_df.rds")
+saveRDS(survival_df, "/Users/prosperchukwuemeka/Movies/Ziglar/New_CC_arabica/Revision/survival_df.rds")
 
 #@@@@@@@@@@@@@@@
 #@@@@@@@@@@@@@@@
@@ -277,100 +264,81 @@ surv.cat
 
 #@@@@@@@@@@@
 #@@@@@@@@@@@
-#fit survival curves for "TPX2" and visualize
-surv.fit <- survfit(Surv(time, event) ~ TPX2, data = surv.cat)
-TPX2.plot <- ggsurvplot(surv.fit, data = surv.cat, risk.table = F, conf.int = T, surv.median.line = "hv",
-           pval = T, legend.title = "TPX2", legend.labs = c("High", "Low")) + 
-  labs(x = "Time (Years)", y = "Survival probability")
+#get shared compound-disease targets
+genes <- compound_disease_targets
 
-#set plot parameters
-ggpar(TPX2.plot, 
-      font.main = c(16, "bold"),
-      font.x = c(16, "bold"),
-      font.y = c(16, "bold"),
-      font.caption = c(16, "bold"), 
-      font.legend = c(16, "bold"), 
-      font.tickslab = c(16, "bold"))
-
-#save survival plot 
-ggsave("TPX2.plot.png", width = 15, height = 12, units = "cm")
-
-#@@@@@@@@@@@
-#@@@@@@@@@@@
-#fit survival curves for "AURKA" and visualize
-surv.fit <- survfit(Surv(time, event) ~AURKA, data = surv.cat)
-AURKA.plot <- ggsurvplot(surv.fit, data = surv.cat, risk.table = F, conf.int = T, surv.median.line = "hv",
-           pval = T, legend.title = "AURKA", legend.labs = c("High", "Low")) + 
-  labs(x = "Time (Years)", y = "Survival probability")
-
-#set plot parameters
-ggpar(AURKA.plot, 
-      font.main = c(16, "bold"),
-      font.x = c(16, "bold"),
-      font.y = c(16, "bold"),
-      font.caption = c(16, "bold"), 
-      font.legend = c(16, "bold"), 
-      font.tickslab = c(16, "bold"))
-
-#save survival plot 
-ggsave("AURKA.plot.png", width = 15, height = 12, units = "cm")
+#Loop through each gene
+for (gene in genes) {
+  
+  #Fit the survival curve for the current gene
+  surv.fit <- survfit(Surv(time, event) ~ get(gene), data = surv.cat)
+  
+  #Generate the survival plot
+  surv.plot <- ggsurvplot(surv.fit, data = surv.cat, risk.table = F, conf.int = T, surv.median.line = "hv", 
+                          pval = T, legend.title = gene, legend.labs = c("High", "Low")) +
+    labs(x = "Time (Years)", y = "Survival probability")
+  
+  #Extract the plot object from the ggsurvplot result
+  surv.plot <- surv.plot$plot
+  
+  #Set plot parameters
+  surv.plot <- ggpar(surv.plot,
+                     font.main = c(16, "bold"),
+                     font.x = c(16, "bold"),
+                     font.y = c(16, "bold"),
+                     font.caption = c(16, "bold"),
+                     font.legend = c(16, "bold"),
+                     font.tickslab = c(16, "bold"))
+  
+  #Save the plot with a dynamic filename
+  ggsave(paste0(gene, "_survival_plot.png"), plot = surv.plot, width = 15, height = 12, units = "cm")
+}
 
 #@@@@@@@@@@@
 #@@@@@@@@@@@
-#fit survival curves for "CCNA2" and visualize
-surv.fit <- survfit(Surv(time, event) ~CCNA2, data = surv.cat)
-CCNA2.plot <- ggsurvplot(surv.fit, data = surv.cat, risk.table = F, conf.int = T, surv.median.line = "hv",
-           pval = T, legend.title = "CCNA2", legend.labs = c("High", "Low")) + 
-  labs(x = "Time (Years)", y = "Survival probability")
+######
+#multivariate cox hazard analysis
+######
+#make surv cat copy
+surv.cat.copy <- surv.cat
 
-#set plot parameters
-ggpar(CCNA2.plot, 
-      font.main = c(16, "bold"),
-      font.x = c(16, "bold"),
-      font.y = c(16, "bold"),
-      font.caption = c(16, "bold"), 
-      font.legend = c(16, "bold"), 
-      font.tickslab = c(16, "bold"))
+#make controls for cox prop hazard
+colnames(surv.cat.copy)[colnames(surv.cat.copy) == "LCK"] <- "LCK (Control 1)"
+colnames(surv.cat.copy)[colnames(surv.cat.copy) == "STAT1"] <- "STAT1 (Control 2)"
 
-#save survival plot 
-ggsave("CCNA2.plot.png", width = 15, height = 12, units = "cm")
+#genes that correlated with poor outcome
+poor.out.genes <- c("LCK (Control 1)", "STAT1 (Control 2)", "CA2", "MET", "MMP3", "CCNA2", "GART", "VDR", "MMP13",
+                    "ADAM17", "FABP4", "MMP12", "PARP1", "MMP1", "PLAU", "MMP7")
 
-#@@@@@@@@@@@
-#@@@@@@@@@@@
-#fit survival curves for "MDM2" and visualize
-surv.fit <- survfit(Surv(time, event) ~MDM2, data = surv.cat)
-MDM2.plot <- ggsurvplot(surv.fit, data = surv.cat, risk.table = F, conf.int = T, surv.median.line = "hv",
-                        pval = T, legend.title = "MDM2", legend.labs = c("High", "Low")) + 
-  labs(x = "Time (Years)", y = "Survival probability")
 
-#set plot parameters
-ggpar(MDM2.plot, 
-      font.main = c(16, "bold"),
-      font.x = c(16, "bold"),
-      font.y = c(16, "bold"),
-      font.caption = c(16, "bold"), 
-      font.legend = c(16, "bold"), 
-      font.tickslab = c(16, "bold"))
+#Loop through each gene to relevel it 
+for (gene in poor.out.genes) {
+  surv.cat.copy[[gene]] <- factor(surv.cat.copy[[gene]], levels = c("low", "high"))
+}
 
-#save survival plot
-ggsave("MDM2.plot.png", width = 15, height = 12, units = "cm")
+# #relevel
+# surv.cat$Initial_weight_of_samples <- factor(surv.cat$Initial_weight_of_samples,
+#                                              levels = c("small", "large"))
 
-#@@@@@@@@@@@
-#@@@@@@@@@@@
-#fit survival curves for "CDK2" and visualize
-surv.fit <- survfit(Surv(time, event) ~CDK2, data = surv.cat)
-CDK2.plot <- ggsurvplot(surv.fit, data = surv.cat, risk.table = F, conf.int = T, surv.median.line = "hv",
-                       pval = T, legend.title = "CDK2", legend.labs = c("High", "Low")) + 
-  labs(x = "Time (Years)", y = "Survival probability")
+#Combine gene names with "+"
+gene_combined <- paste(poor.out.genes, collapse = " + ")
 
-#set plot parameters
-ggpar(CDK2.plot, 
-      font.main = c(16, "bold"),
-      font.x = c(16, "bold"),
-      font.y = c(16, "bold"),
-      font.caption = c(16, "bold"), 
-      font.legend = c(16, "bold"), 
-      font.tickslab = c(16, "bold"))
+#Print the result
+print(gene_combined)
 
-#save survival plot 
-ggsave("CDK2.plot.png", width = 15, height = 12, units = "cm")
+#run model
+multi.cox_model <- coxph(Surv(time, event) ~ `LCK (Control 1)` + `STAT1 (Control 2)` + CA2 + MET + MMP3 + 
+                           CCNA2 + GART + VDR + MMP13 + ADAM17 + FABP4 + MMP12 + PARP1 + MMP1 + PLAU + MMP7,
+                         data = surv.cat.copy)
+
+# # Calculate hazard ratio
+# cox_summary.multi <- summary(multi.cox_model)
+# hazard_ratio.multi <- exp(cox_summary.multi$coefficients) %>% as.data.frame()
+# hazard_ratio.multi <- hazard_ratio.multi$`exp(coef)`
+
+#plot multivariate cox result
+plot <- ggforest(multi.cox_model, fontsize = 1.3, refLabel = "reference") 
+
+#save fig
+# Save the plot
+ggsave(filename = "/Users/prosperchukwuemeka/Movies/Ziglar/New_CC_arabica/cc_carabica_cox_plot.png", plot = plot, width = 16, height = 8, dpi = 600)
