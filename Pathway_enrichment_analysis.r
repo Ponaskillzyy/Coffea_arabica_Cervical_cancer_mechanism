@@ -7,30 +7,41 @@ suppressWarnings(suppressPackageStartupMessages({library(dplyr); library(ggplot2
   library(tibble); library(stats); library(ggfortify); library(clusterProfiler); library(edgeR)}))
 
 #setwd 
-setwd("/Users/prosperchukwuemeka/Movies/Ziglar/New_CC_arabica")
+setwd("/Users/prosperchukwuemeka/Movies/Ziglar/New_CC_arabica/Revision")
 
 #@@@@@@@@@@@@@@@@@@@@
 #@@@@@@@@@@@@@@@@@@@@
 #isolate interesting genesets for KEGG and Reactome and gene ontology analysis
 c2.genesets <- msigdbr(species="Homo sapiens", category="C2") 
 
-# #get KEGG LEGACY genesets in c2 from msigdb
-# kegg.indices <- grepl("KEGG", c2.genesets$gs_name, ignore.case = TRUE)
+#get KEGG LEGACY and Reactome genesets in c2 from msigdb
+kegg.indices <- grepl("KEGG", c2.genesets$gs_name, ignore.case = TRUE)
 Reactome.indices <- grepl("REACTOME", c2.genesets$gs_name, ignore.case = TRUE)
 
-# #Get the rows that match the pattern
-# c2.kegg_genesets <- c2.genesets[kegg.indices, ]
+##########
+#Get the rows that match the pattern
+##########
+#kegg
+c2.kegg_genesets <- c2.genesets[kegg.indices, ]
+length(unique(c2.kegg_genesets$gs_name))
+#total kegg gse == "186"
+
+#reactome
 c2.reactome_genesets <- c2.genesets[Reactome.indices, ]
+length(unique(c2.reactome_genesets$gs_name))
+#total reactome gse == "1615"
 
 #isolate hallmark genesets 
 hallmark.genesets <- msigdbr(species="Homo sapiens", category="H") 
+length(unique(hallmark.genesets$gs_name))
+#total gse == "50"
 
 #combine both genesets
-genesets <- rbind(c2.reactome_genesets, hallmark.genesets)
+genesets <- rbind(c2.reactome_genesets, c2.kegg_genesets, hallmark.genesets)
 
 #number of genesets
 length(unique(genesets$gs_name))
-
+#total gse == "1851"
 
 #print
 print(genesets)
@@ -52,23 +63,21 @@ genesets$gs_name <- format_row_names(genesets$gs_name)
 
 #@@@@@@@@@@@@@@@@@@@@
 #@@@@@@@@@@@@@@@@@@@@
-##########
-#read protein targets
-##########
-cc_carabica.proteins <- c("PLAU", "TPX2", "TPI1", "FABP5", "KIF11", "GPI", "ESRRA", "AURKA", "MTHFD1", 
-                          "UMPS", "GM2A", "RANBP1", "TYMS", "GART", "CCNA2", "STAT1", "DOT1L", "MMP12", 
-                          "PARP1", "VDR", "HMGCR", "TK1", "MDM2", "SYK", "DTYMK", "HPRT1", "ADK", 
-                          "CA2", "CDK2", "ACP3", "SEC14L2", "GALE", "YARS1", "SULT2B1", "TYMP", 
-                          "S100A9", "UCK2", "MMP9")
+#load compound-disease shared targets
+compound_disease_targets <- fread("Common Targets.csv") %>% 
+  pull(`Common Targets`) 
+  
+#exclude specific genes
+compound_disease_targets <- setdiff(compound_disease_targets, c("AKR1C1", "AKR1C2", "NOS2"))
 
 ##########
-#Run enrichment analysis using cc_carabica.proteins and curated c2 genesets
+#Run enrichment analysis using compound_disease_targets and curated genesets from kegg, reactome, and hallmark database
 ##########
-cc_carabica.proteins.enrichment <- enricher(cc_carabica.proteins, minGSSize = 38, maxGSSize = 300, TERM2GENE = genesets, pAdjustMethod = "BH")
-cc_carabica.proteins.enrichment.res <- cc_carabica.proteins.enrichment@result
+compound_disease_targets.enrichment <- enricher(compound_disease_targets, minGSSize = 10, maxGSSize = 500, TERM2GENE = genesets, pAdjustMethod = "BH")
+compound_disease_targets.enrichment.res <- compound_disease_targets.enrichment@result
 
 #subset significant pathway
-cc_carabica.proteins.enrichment.res <- subset(cc_carabica.proteins.enrichment.res, subset = p.adjust < 0.05)
+compound_disease_targets.enrichment.res <- subset(compound_disease_targets.enrichment.res, subset = p.adjust < 0.05)
 
 # Function to format genes
 format_genes <- function(gene_string) {
@@ -80,10 +89,10 @@ format_genes <- function(gene_string) {
 }
 
 #Apply the function to the column
-cc_carabica.proteins.enrichment.res$format_genes <- sapply(cc_carabica.proteins.enrichment.res$geneID, format_genes)
+compound_disease_targets.enrichment.res$format_genes <- sapply(compound_disease_targets.enrichment.res$geneID, format_genes)
 
 #calculate fold enrichment
-cc_carabica.proteins.enrichment.res <- cc_carabica.proteins.enrichment.res %>%
+compound_disease_targets.enrichment.res <- compound_disease_targets.enrichment.res %>%
   separate(GeneRatio, into = c("GeneNum", "GeneDenom"), sep = "/") %>%
   separate(BgRatio, into = c("BgNum", "BgDenom"), sep = "/") %>%
   mutate(
@@ -101,42 +110,37 @@ cc_carabica.proteins.enrichment.res <- cc_carabica.proteins.enrichment.res %>%
     `Fold Enrichment` = GeneRatioValue / BgRatioValue
   ) 
 
-#filter top 20 pathways
-cc_carabica.proteins.enrichment.res <- cc_carabica.proteins.enrichment.res %>% 
-  slice_max(n = 20, order_by = `Fold Enrichment`) %>% as.data.frame()
-
 #View the result
-View(cc_carabica.proteins.enrichment.res)
+View(compound_disease_targets.enrichment.res)
 
 #save csv
-write.csv(cc_carabica.proteins.enrichment.res, file = "cc_carabica_enriched_pathways.csv")
-
+write.csv(compound_disease_targets.enrichment.res, file = "cc_carabica_enriched_pathways.csv")
 
 #######
 #plot
 #######
-#plot parameter
-themes <- theme(strip.text = element_text(face = "bold", size = 8), panel.border = element_rect(color = "black", fill = NA, size = 1),
-                legend.text = element_text(face = "bold", size = 15),legend.title = element_text(face = "bold", size = 13),
-                plot.title = element_text(face = "bold", size = 15), axis.title = element_text(face = "bold", size = 15),
-                axis.text.x = element_text(face = "bold", size = 10, colour = "black", angle = 15, hjust = 1),
-                axis.text.y = element_text(face = "bold", size = 12, colour = "black"),
-                panel.background = element_rect(fill = "white"), axis.line = element_line(linewidth = 0.8, colour = "black"))
+#filter top 20 pathways
+compound_disease_targets.enrichment.res <- compound_disease_targets.enrichment.res %>% 
+  slice_max(n = 20, order_by = `Fold Enrichment`) %>% as.data.frame()
 
-#plot
-plot <- ggplot(cc_carabica.proteins.enrichment.res, aes(x = reorder(ID, `Fold Enrichment`), y = `Fold Enrichment`, fill = -log10(p.adjust))) +
+# Use RdBu color scale from RColorBrewer
+color_scale <- scale_fill_distiller(
+  palette = "RdBu",  # Use the RdBu palette
+  direction = -1,    # Reverse the palette if needed
+  name = expression(bold("-Log"[10]*"(FDR)"))  # Custom legend title
+)
+
+# Your ggplot code
+ggplot(compound_disease_targets.enrichment.res, aes(x = reorder(rownames(compound_disease_targets.enrichment.res), `Fold Enrichment`), y = `Fold Enrichment`, fill = -log10(p.adjust))) +
   geom_bar(stat = "identity") +
-  coord_flip() + labs(x = "Enriched Genesets", y= "Fold Enrichment",
-                      fill = expression(bold("-Log"[10]*"(FDR)"))) +
-  geom_text(aes(label = sprintf("%.1f", `Fold Enrichment`), fontface = "bold"),
-                                                   position = position_stack(vjust = 0.5),
-                                                   size = 5, color = "white") +
-  themes + ggtitle("Significant genesets associated with target overlap between CC DEGs and C.arabica") 
-
-#save fig
-# Save the plot
-ggsave(filename = "cc_carabica_pathway_plot.png", plot = plot, width = 16, height = 8, dpi = 600)
-
+  coord_flip() +
+  labs(x = "Enriched Genesets", y= "Fold Enrichment",
+       fill = expression(bold("-Log"[10]*"(FDR)"))) +
+  geom_text(aes(label = format_genes, fontface = "bold"),
+            position = position_stack(vjust = 0.5),
+            size = 3.2, color = "black") +
+  ggtitle("Significant Genesets Associated with Shared Compound-Cervical Cancer Targets") +
+  color_scale + theme_classic() + themes
 
 # #@@@@@@@@@@@@@@@@@@@@
 # #@@@@@@@@@@@@@@@@@@@@
@@ -166,20 +170,20 @@ ggsave(filename = "cc_carabica_pathway_plot.png", plot = plot, width = 16, heigh
 # 
 # 
 # #plot
-# ggplot(cc_carabica.proteins.enrichment.res, aes(x = reorder(ID, `Fold Enrichment`), y = `Fold Enrichment`, fill = -log10(p.adjust), size = Count)) +
+# ggplot(compound_disease_targets.enrichment.res, aes(x = reorder(ID, `Fold Enrichment`), y = `Fold Enrichment`, fill = -log10(p.adjust), size = Count)) +
 #   geom_point(shape = 21, stroke = 0.1) +
 #   coord_flip() +
 #   theme_mrl(1.3) +
 #   theme(strip.text = element_text(face = "bold", size = 8), panel.border = element_rect(color = "black", fill = NA, size = 1),
 #         legend.text = element_text(face = "bold", size = 15),legend.title = element_text(face = "bold", size = 13),
 #         plot.title = element_text(face = "bold", size = 15), axis.title = element_text(face = "bold", size = 15),
-#         axis.text.x = element_text(face = "bold", size = 10, colour = "black", angle = 15, hjust = 1), 
+#         axis.text.x = element_text(face = "bold", size = 10, colour = "black", angle = 15, hjust = 1),
 #         axis.text.y = element_text(face = "bold", size = 12, colour = "black"),
 #         aspect.ratio = 2, legend.key.size = unit(0.4, "cm"),
 #         panel.background = element_rect(fill = "white"), axis.line = element_line(linewidth = 0.8, colour = "black"))+
 #   scale_x_discrete(position = "bottom",labels = function(x) str_wrap(x, width = 30)) +
 #   labs(x = "Enriched Genesets", y = "Fold Enrichment", fill = expression(bold("-Log"[10]*"(FDR)"))) +
-#   scale_fill_viridis_c() +
+#   color_scale + #scale_fill_viridis() +
 #   guides(size= guide_legend(title = "Number of genes")) +
-#   ggtitle("Significant genesets associated with target overlap between CC and C.arabica") 
+#   ggtitle("Significant Genesets Associated with Shared Compound-Cervical Cancer Targets")
 # 
